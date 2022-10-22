@@ -7,12 +7,15 @@ from functools import lru_cache
 import pandas as pd
 import scipy.optimize
 import scipy as sc
+from sklearn.neighbors import KDTree
+import pdb
 
 RADIUS = 1
 SPEED_OF_SOUND = 0.75
 BESSEL_ROOTS = [jn_zeros(m, 10) for m in range(10)]
 FPS = 25
 TIME_PER_MODE = 20
+error_cross = False
 
 MODES = (
     (0, 1),
@@ -20,6 +23,21 @@ MODES = (
 )
 FRAMES = len(MODES) * TIME_PER_MODE * FPS
 
+def calc_angle_with_xy(vectors):
+    l = np.sum(vectors[:,:2]**2, axis=1) ** 0.5
+    return np.arctan2(vectors[:, 2], l)
+
+def calc_cross(p1, p2, p3):
+    v1 = p2 - p1
+    v2 = p3 - p1
+    v3 =  np.cross(v1, v2)
+    mod_v3 = np.linalg.norm(v3)
+
+    if mod_v3 == 0:
+        print("zero cross:",p1,p2,p3,"antiparallel vectors")
+        mod_v3 = 1
+
+    return v3 / mod_v3
 
 @lru_cache()
 def lambda_mn(m, n, radius):
@@ -72,11 +90,44 @@ omega = SPEED_OF_SOUND * lambda_mn(m, n, RADIUS)
 
 
 def calculate_vibration(frame):
+    global error_cross
     t = frame / FPS
     m, n = MODES[int(t // TIME_PER_MODE)]
 
-    #z = circular_membrane(r, theta, t, m, n, RADIUS, SPEED_OF_SOUND)    
+    z = circular_membrane(r, theta, t, m, n, RADIUS, SPEED_OF_SOUND)    
     #plot x,y,z here
+
+
+    #find normals of surface
+    X = x.flatten()
+    Y = y.flatten()
+    Z = z.flatten()
+
+    #decrease points for plotting
+    iterations_remove = 4
+    X = np.delete(X, np.arange(0, X.size, iterations_remove)) 
+    Y = np.delete(Y, np.arange(0, Y.size, iterations_remove))
+    Z = np.delete(Z, np.arange(0, Z.size, iterations_remove))
+
+    data = np.array([X, Y, Z]).T
+
+    #remove vars that are duplicate ,ie at origin
+
+    
+    tree = KDTree(data, metric='minkowski') # minkowki is p2 (euclidean)
+    
+    dist, ind = tree.query(data, k=3) #k=3 points including itself
+    combinations = np.array(data[ind])
+    # map with functools
+
+    normals = list(map(lambda kx: calc_cross(*kx), combinations))
+    
+
+    kn = np.array(normals)
+    kn[calc_angle_with_xy(kn) < 0] *= -1
+    u, v, w = kn.T
+
+
 
     t_opt = sc.optimize.fmin(target_func, x0=-10,args=( t, m, n, RADIUS, SPEED_OF_SOUND))
     intersection_point = line_func(t_opt)
