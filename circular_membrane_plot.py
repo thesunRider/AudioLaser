@@ -17,20 +17,22 @@ RADIUS = 1
 SPEED_OF_SOUND = 0.75
 BESSEL_ROOTS = [jn_zeros(m, 10) for m in range(10)]
 FPS = 25
-TIME_PER_MODE = 2
+TIME_PER_MODE = 10
 
 MODES = (
     (0, 1),
     (1, 1)
 )
 all_cords = np.array([])
+tree = None
+data = None
 FRAMES = len(MODES) * TIME_PER_MODE * FPS
 
 plotted_points = [None] * 5
 #np.seterr(divide='ignore', invalid='ignore')
 
 p0 = np.array([1, 1, 1]) # starting point for the line
-direction = np.array( np.sqrt([1/3, 1/3, 1/3])) # direction vector
+direction = np.array( [1,1,1]) # direction vector
 
 def line_func(t):
     """Function of the straight line.
@@ -90,10 +92,16 @@ def get_vmin_vmax(m, n):
     return -vmax, vmax
 
 def calc_cross(p1, p2, p3):
+    global tree
     v1 = p2 - p1
     v2 = p3 - p1
     v3 =  np.cross(v1, v2)
-    return v3 / np.linalg.norm(v3)
+    mod_v3 = np.linalg.norm(v3)
+    if mod_v3 == 0:
+        print("zero cross:",p1,p2,p3,"antiparallel vectors")
+        mod_v3 = 1
+
+    return v3 / mod_v3
 
 def PCA_unit_vector(array, pca=PCA(n_components=3)):
     pca.fit(array)
@@ -131,7 +139,7 @@ ax.set_ylabel('$Y$')
 ax.set_zlabel('$Z$')
 
 #(x1,x2),(y1,y2),(z1,z2)
-laser_axis = ((-1,1),(-1,1),(-1,1))
+laser_axis = ((0,1),(0,1),(0,1))
 laser_out = ax.plot3D(laser_axis[0],laser_axis[1],laser_axis[2] ,color='k')
 
 plot = ax.plot_surface(
@@ -166,7 +174,7 @@ def update(i, bar=None):
     global plot
     global ax
     global laser_out
-    global plotted_points
+    global plotted_points,tree
 
     if plotted_points[0] is not None:
         plotted_points[0][0].remove()
@@ -186,37 +194,37 @@ def update(i, bar=None):
 
 
     #find normals of surface
-    X, Y, Z = map(lambda g: g.flatten(), [x, y, z])
+    X = x.flatten()
+    Y = y.flatten()
+    Z = z.flatten()
 
-    #decrease points for plotting
-    iterations_remove = 3
-    for i in range(0,iterations_remove):
-        X = [am for i, am in enumerate(X) if i % 2 == 0]
-        Y = [am for i, am in enumerate(Y) if i % 2 == 0]
-        Z = [am for i, am in enumerate(Z) if i % 2 == 0]
+    #decrease points for processing
+    iterations_remove_procs = 3
+    for i in range(0,iterations_remove_procs):
+        X = np.delete(X, np.arange(0, X.size, 2)) 
+        Y = np.delete(Y, np.arange(0, Y.size, 2))
+        Z = np.delete(Z, np.arange(0, Z.size, 2))
 
     data = np.array([X, Y, Z]).T
+
     tree = KDTree(data, metric='minkowski') # minkowki is p2 (euclidean)
     
     dist, ind = tree.query(data, k=5) #k=3 points including itself
-    combinations = data[ind]
+    combinations = np.array(data[ind])
+
     # map with functools
     pca = PCA(n_components=3)
-    normals3 = list(map(partial(PCA_unit_vector, pca=pca), combinations))
+    normals = list(map(partial(PCA_unit_vector, pca=pca), combinations))
 
-    kn = np.array(normals3)
+    #normals = list(map(lambda kx: calc_cross(*kx), combinations))
+
+    kn = np.array(normals)
     kn[calc_angle_with_xy(kn) < 0] *= -1
     u, v, w = kn.T
-
-    plotted_points[1] = ax.quiver(X, Y, Z, u, v, w, length=0.1, normalize=True,zorder=105)
-
-
 
     #find intersection point
     t_opt = sc.optimize.fmin(opt_line, x0=-1,args=( t, m, n, RADIUS, SPEED_OF_SOUND),disp=False,retall=False,full_output=False)
     intersection_point = line_func(t_opt)
-
-    plotted_points[0] = ax.plot([intersection_point[0]],[intersection_point[1]],[intersection_point[2]], markerfacecolor='k', markeredgecolor='k', marker='o', markersize=5, alpha=0.9)
 
 
     #find nearest normal
@@ -228,10 +236,20 @@ def update(i, bar=None):
             min_val = mod_val
             min_i = i
 
-    plotted_points[2] = ax.plot([X[min_i]],[Y[min_i]],[Z[min_i]], markerfacecolor='r', markeredgecolor='r', marker='o', markersize=5, alpha=0.9,zorder=103)
 
     normal_direc = [u[min_i],v[min_i],w[min_i]]
     normal_intersect = [X[min_i],Y[min_i],Z[min_i]]
+
+    #decrease points for plotting
+    iterations_remove_plot = 2
+    for i in range(0,iterations_remove_plot):
+        X = np.delete(X, np.arange(0, X.size, 2)) 
+        Y = np.delete(Y, np.arange(0, Y.size, 2))
+        Z = np.delete(Z, np.arange(0, Z.size, 2))
+        u = np.delete(u, np.arange(0, u.size, 2)) 
+        v = np.delete(v, np.arange(0, v.size, 2))
+        w = np.delete(w, np.arange(0, w.size, 2))
+
 
     print("line  at:",intersection_point)
     print("Normal at:",normal_intersect)
@@ -240,6 +258,11 @@ def update(i, bar=None):
     
     vmin, vmax = get_vmin_vmax(m, n)
     plot.remove()
+
+    #plot all points
+    plotted_points[0] = ax.plot([intersection_point[0]],[intersection_point[1]],[intersection_point[2]], markerfacecolor='k', markeredgecolor='k', marker='o', markersize=5, alpha=0.9)
+    plotted_points[1] = ax.quiver(X, Y, Z, u, v, w, length=0.1, normalize=True,zorder=105)
+    plotted_points[2] = ax.plot([normal_intersect[0]],[normal_intersect[1]],[normal_intersect[2]], markerfacecolor='r', markeredgecolor='r', marker='o', markersize=5, alpha=0.9,zorder=103)
 
     plot = ax.plot_surface(
         x,
