@@ -1,0 +1,8 @@
+progress
+np
+scipy
+open3d
+snnpy
+distinctipy
+pygame
+neat-python
